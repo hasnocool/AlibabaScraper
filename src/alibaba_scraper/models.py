@@ -1,7 +1,7 @@
 # src/alibaba_scraper/models.py
 """Normalized product data models."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -29,4 +29,4 @@ class ProductRecord(BaseModel):
     price: PriceRange | None = None
     image_urls: list[HttpUrl] = Field(default_factory=list)
     attributes: dict[str, str] = Field(default_factory=dict)
-    scraped_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
