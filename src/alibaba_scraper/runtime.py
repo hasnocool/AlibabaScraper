@@ -4,7 +4,7 @@
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from .control import ControlRepository
 from .database import Database
@@ -12,6 +12,9 @@ from .intelligence import IntelligenceRepository
 from .pipeline import CrawlPipeline
 from .scraper import AlibabaScraper
 from .watchlists import WatchlistService
+
+if TYPE_CHECKING:
+    from .production import ProductionRepository
 
 TaskKind = Literal["crawl", "watchlist"]
 TaskStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
@@ -47,7 +50,7 @@ class RuntimeTask:
 
 
 class RuntimeManager:
-    """Own live asyncio tasks while durable crawl/watch progress stays in SQLite."""
+    """Own live asyncio tasks while durable progress stays in SQLite."""
 
     def __init__(
         self,
@@ -55,11 +58,14 @@ class RuntimeManager:
         intelligence: IntelligenceRepository,
         control: ControlRepository,
         scraper: AlibabaScraper,
+        *,
+        production: "ProductionRepository | None" = None,
     ) -> None:
         self.database = database
         self.intelligence = intelligence
         self.control = control
         self.scraper = scraper
+        self.production = production
         self._states: dict[str, RuntimeTask] = {}
         self._lock = asyncio.Lock()
 
@@ -138,6 +144,8 @@ class RuntimeManager:
                 intelligence=self.intelligence,
             ).run(state.target_id)
             await self.control.rescore(job_id=summary.job_id)
+            if self.production is not None:
+                await self.production.rescore_category_profiles(self.control)
             await self.control.alert_for_high_scores(summary.job_id)
             state.result = summary.model_dump(mode="json")
             state.status = "completed"
@@ -161,6 +169,8 @@ class RuntimeManager:
                 self.intelligence,
                 control=self.control,
             ).run_watchlist(state.target_id)
+            if self.production is not None:
+                await self.production.rescore_category_profiles(self.control)
             state.result = result.model_dump(mode="json")
             state.status = "completed"
         except asyncio.CancelledError:

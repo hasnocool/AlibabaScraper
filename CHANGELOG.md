@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The project follows Semantic Versioning.
 
+## [0.5.0] - 2026-08-08
+
+### Added
+
+- Scoped API-key authentication with one-time plaintext key creation, hash-only persistence, expiry, revocation, and last-used tracking.
+- OpenAPI API-key security metadata plus browser session-cookie support for the authenticated dashboards.
+- Transactional SQLite migration runner and explicit `migrate` CLI command.
+- User/system systemd install, uninstall, and status commands.
+- Authenticated health/readiness endpoints and Prometheus-style service metrics.
+- Request count, 5xx count, latency, uptime, runtime-task, schema, and alert-delivery telemetry.
+- Production operations dashboard with catalog/category charts, product comparison, and price-history visualization.
+- Saved landed-cost scenarios linked optionally to product keys.
+- Category-pattern scoring-profile bindings with persisted category-specific scores.
+- Configurable webhook alert sinks, optional HMAC-SHA256 signatures, event/severity filters, delivery history, retry state, and service-side dispatch loop.
+- Recurring watchlist scheduling inside the long-running FastAPI service so one systemd process owns API, scheduled recrawls, and alert delivery.
+- Production-operation CLI commands for keys, migrations, systemd, scenarios, category scoring, alert sinks, delivery, and comparisons.
+- v0.5 regression tests covering migrations, authentication, scenarios, category profiles, signed webhook delivery, service auth, and systemd unit rendering.
+- `docs/OPERATIONS.md` production installation and operating guide.
+
+### Changed
+
+- Version bumped from 0.4.0 to 0.5.0.
+- `fastapi` and `uvicorn` are pinned to the exact versions validated by CI for the production service.
+- `/` now serves the authenticated production-operations dashboard; the previous dashboard remains available at `/classic`.
+- Service authentication is enabled by default and the bind address remains `127.0.0.1`.
+- Service-managed crawls/watchlists refresh category-specific scores automatically when category bindings exist.
+- Default user agent updated to `AlibabaScraper/0.5`.
+
 ## [0.4.0] - 2026-08-08
 
 ### Added

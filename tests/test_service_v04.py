@@ -7,11 +7,11 @@ from alibaba_scraper.service import create_app
 
 
 def test_service_health_dashboard_profiles_and_landed_cost(tmp_path: Path) -> None:
-    app = create_app(tmp_path / "service.sqlite3")
+    app = create_app(tmp_path / "service.sqlite3", auth_required=False)
     with TestClient(app) as client:
         health = client.get("/api/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.4.0"
+        assert health.json()["version"] == "0.5.0"
 
         dashboard = client.get("/")
         assert dashboard.status_code == 200

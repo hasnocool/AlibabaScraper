@@ -26,30 +26,39 @@
 ## 0.4 — Service + dashboards ✅
 
 - FastAPI service and OpenAPI docs.
-- Browser control dashboard.
-- Terminal dashboard.
+- Browser and terminal dashboards.
 - Live crawl start/resume/cancel control.
 - Product/supplier browsing and score filters.
 - Configurable scoring profiles and persisted profile scores.
 - Watchlist/high-score alert inbox.
 - Generic landed-cost calculations.
 
-## 0.5 — Operations + comparison
+## 0.5 — Production operations ✅
 
-- Explicit schema migrations.
-- Service install/upgrade/uninstall scripts and systemd integration.
-- Dashboard crawl telemetry and performance charts.
-- Product comparison and sourcing shortlists.
-- Retry/error queue management.
-- Alert delivery adapter interface.
-- Landed-cost preset profiles with visible assumptions.
+- Scoped API-key authentication, expiry, revocation, and OpenAPI security metadata.
+- Transactional schema migrations and explicit migration command.
+- systemd user/system installation, removal, and status tooling.
+- Service liveness/readiness, Prometheus-style metrics, and request latency/error telemetry.
+- Service-owned recurring watchlist scheduler and alert-delivery dispatcher.
+- Rich product comparison, price-history, category, and score-distribution data/visuals.
+- Saved landed-cost scenarios.
+- Category-specific scoring-profile bindings and category score persistence.
+- Configurable signed webhook alert delivery with severity/event filters and delivery history.
 
-## 0.6 — Rendering + scale
+## 0.6 — Operational resilience
+
+- Targeted retry/error queue management.
+- API-key rotation and optional short-lived access tokens.
+- JSON logging, retention, backups, integrity checks, and restore tooling.
+- Alert dead-letter/backoff policies and additional notification adapters.
+- Supplier-quality history and richer comparison reports.
+- Optional TLS/reverse-proxy deployment recipes.
+
+## 0.7 — Rendering + scale
 
 - Optional Playwright normal-browser rendering for public JavaScript-only pages.
-- Optional PostgreSQL persistence when measured workload warrants it.
+- Optional PostgreSQL persistence only when measured workload warrants it.
 - Multi-worker service coordination without duplicate crawl execution.
-- API authentication/authorization for intentionally remote deployments.
 
 ## Guardrails
 

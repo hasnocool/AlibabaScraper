@@ -24,4 +24,9 @@ class Settings(BaseSettings):
     database_path: Path = Path("data/alibaba.sqlite3")
     service_host: str = "127.0.0.1"
     service_port: int = Field(default=8787, ge=1, le=65535)
-    user_agent: str = "AlibabaScraper/0.4 (+public-data-research)"
+    auth_required: bool = True
+    watch_scheduler_enabled: bool = True
+    watch_scheduler_poll_seconds: float = Field(default=60.0, ge=1.0, le=3600.0)
+    alert_dispatch_interval_seconds: float = Field(default=10.0, ge=1.0, le=3600.0)
+    alert_delivery_timeout_seconds: float = Field(default=10.0, ge=1.0, le=120.0)
+    user_agent: str = "AlibabaScraper/0.5 (+public-data-research)"

@@ -1,317 +1,195 @@
 # src/alibaba_scraper/service.py
-"""FastAPI control plane for AlibabaScraper."""
+"""Authenticated FastAPI control plane for AlibabaScraper."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from decimal import Decimal
 from pathlib import Path
-from typing import Annotated
+from typing import Any
 
-import aiosqlite
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
+from .alert_delivery import AlertDispatcher
 from .config import Settings
-from .control import ControlRepository, ScoringProfileInput
+from .control import ControlRepository
 from .database import Database
 from .intelligence import IntelligenceRepository
-from .landed_cost import LandedCostInput, LandedCostResult, calculate_landed_cost
+from .migrations import migrate_database
+from .production import ProductionRepository, Scope
 from .runtime import RuntimeManager
 from .scraper import AlibabaScraper
-from .webui import DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS
+from .service_core_routes import register_core_routes
+from .service_production_routes import register_production_routes
+from .telemetry import RequestTimer, TelemetryRegistry
+from .watchlists import WatchlistService
 
 
-class CrawlRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=300)
-    max_products: int = Field(default=50, ge=1, le=5000)
-    max_search_pages: int = Field(default=5, ge=1, le=100)
-
-
-class WatchlistRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    query: str = Field(min_length=1, max_length=300)
-    interval_minutes: int = Field(default=1440, ge=1, le=525600)
-    max_products: int = Field(default=50, ge=1, le=5000)
-    max_search_pages: int = Field(default=5, ge=1, le=100)
-
-
-class WatchlistUpdate(BaseModel):
-    enabled: bool
-
-
-class RescoreRequest(BaseModel):
-    profile_id: int | None = None
-    job_id: int | None = None
-
-
-def create_app(database_path: Path | str = Path("data/alibaba.sqlite3")) -> FastAPI:
-    """Create a local-first API/dashboard application."""
+def create_app(
+    database_path: Path | str = Path("data/alibaba.sqlite3"),
+    *,
+    auth_required: bool | None = None,
+) -> FastAPI:
+    """Create the authenticated local-first API/dashboard application."""
     path = Path(database_path)
+    base_settings = Settings(database_path=path)
+    require_auth = base_settings.auth_required if auth_required is None else auth_required
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        settings = Settings(database_path=path)
+        settings = Settings(database_path=path, auth_required=require_auth)
+        await migrate_database(path)
         database = Database(path)
         intelligence = IntelligenceRepository(path)
         control = ControlRepository(path)
+        production = ProductionRepository(path)
         scraper = AlibabaScraper(settings)
         await database.open()
         await intelligence.open()
         await control.open()
-        runtime = RuntimeManager(database, intelligence, control, scraper)
+        await production.open()
+        runtime = RuntimeManager(
+            database, intelligence, control, scraper, production=production
+        )
+        telemetry = TelemetryRegistry()
+        dispatcher = AlertDispatcher(
+            production,
+            interval_seconds=settings.alert_dispatch_interval_seconds,
+            timeout_seconds=settings.alert_delivery_timeout_seconds,
+        )
+        dispatcher.start()
+        watch_scheduler: asyncio.Task[None] | None = None
+        if settings.watch_scheduler_enabled:
+            watch_service = WatchlistService(
+                scraper, database, intelligence, control=control
+            )
+            watch_scheduler = asyncio.create_task(
+                _watch_scheduler_loop(
+                    watch_service, production, control, settings.watch_scheduler_poll_seconds
+                ),
+                name="watchlist-scheduler",
+            )
+        app.state.settings = settings
         app.state.database = database
         app.state.intelligence = intelligence
         app.state.control = control
+        app.state.production = production
         app.state.scraper = scraper
         app.state.runtime = runtime
+        app.state.telemetry = telemetry
+        app.state.dispatcher = dispatcher
         try:
             yield
         finally:
+            if watch_scheduler is not None:
+                watch_scheduler.cancel()
+                await asyncio.gather(watch_scheduler, return_exceptions=True)
+            await dispatcher.stop()
             await runtime.shutdown()
             await scraper.aclose()
+            await production.close()
             await control.close()
             await intelligence.close()
             await database.close()
 
     app = FastAPI(
         title="AlibabaScraper",
-        version="0.4.0",
-        description="Local-first Alibaba public-product collection and sourcing intelligence API.",
+        version="0.5.0",
+        description="Authenticated Alibaba public-product collection and sourcing operations API.",
         lifespan=lifespan,
     )
 
-    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    async def dashboard_page() -> str:
-        return DASHBOARD_HTML
-
-    @app.get("/assets/dashboard.css", response_class=PlainTextResponse, include_in_schema=False)
-    async def dashboard_css() -> PlainTextResponse:
-        return PlainTextResponse(DASHBOARD_CSS, media_type="text/css")
-
-    @app.get("/assets/dashboard.js", response_class=PlainTextResponse, include_in_schema=False)
-    async def dashboard_js() -> PlainTextResponse:
-        return PlainTextResponse(DASHBOARD_JS, media_type="application/javascript")
-
-    @app.get("/api/health")
-    async def health(request: Request) -> dict[str, object]:
-        control = _control(request)
-        profile = await control.active_profile()
-        return {"status": "ok", "version": "0.4.0", "active_profile": profile.name}
-
-    @app.get("/api/dashboard")
-    async def dashboard(request: Request) -> dict[str, object]:
-        return await _control(request).dashboard_summary()
-
-    @app.get("/api/products")
-    async def products(
-        request: Request,
-        query: str | None = None,
-        supplier_key: str | None = None,
-        currency: str | None = None,
-        min_score: Annotated[float | None, Query(ge=0, le=100)] = None,
-        max_price: Annotated[Decimal | None, Query(gt=0)] = None,
-        limit: Annotated[int, Query(ge=1, le=500)] = 100,
-        offset: Annotated[int, Query(ge=0)] = 0,
-    ) -> list[dict[str, object]]:
-        return await _control(request).list_products(
-            query=query,
-            supplier_key=supplier_key,
-            currency=currency,
-            min_score=min_score,
-            max_price=max_price,
-            limit=limit,
-            offset=offset,
-        )
-
-    @app.get("/api/products/{identifier:path}")
-    async def product_detail(request: Request, identifier: str) -> dict[str, object]:
-        product = await _control(request).get_product(identifier)
-        if product is None:
-            raise HTTPException(status_code=404, detail="product not found")
-        return product
-
-    @app.get("/api/suppliers")
-    async def suppliers(
-        request: Request,
-        limit: Annotated[int, Query(ge=1, le=1000)] = 100,
-    ) -> list[dict[str, object]]:
-        rows = await _intelligence(request).list_suppliers(limit)
-        return [row.model_dump(mode="json") for row in rows]
-
-    @app.get("/api/suppliers/{supplier_key:path}/products")
-    async def supplier_products(
-        request: Request,
-        supplier_key: str,
-        limit: Annotated[int, Query(ge=1, le=1000)] = 100,
-    ) -> list[dict[str, object]]:
-        return await _intelligence(request).supplier_products(supplier_key, limit)
-
-    @app.get("/api/jobs")
-    async def jobs(
-        request: Request,
-        limit: Annotated[int, Query(ge=1, le=500)] = 100,
-    ) -> list[dict[str, object]]:
-        rows = await _database(request).list_jobs(limit)
-        return [row.model_dump(mode="json") for row in rows]
-
-    @app.post("/api/jobs", status_code=202)
-    async def create_job(request: Request, values: CrawlRequest) -> dict[str, object]:
-        state = await _runtime(request).create_crawl(
-            values.query,
-            max_products=values.max_products,
-            max_search_pages=values.max_search_pages,
-        )
-        return state.public()
-
-    @app.post("/api/jobs/{job_id}/resume", status_code=202)
-    async def resume_job(request: Request, job_id: int) -> dict[str, object]:
+    @app.middleware("http")
+    async def production_middleware(request: Request, call_next: Any):
+        timer = RequestTimer()
+        status_code = 500
         try:
-            state = await _runtime(request).schedule_crawl(job_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return state.public()
+            if _requires_auth(request.url.path, require_auth):
+                raw_key = request.headers.get("X-API-Key") or request.cookies.get(
+                    "alibaba_api_key", ""
+                )
+                principal = await request.app.state.production.authenticate(raw_key)
+                if principal is None:
+                    status_code = 401
+                    return JSONResponse(
+                        status_code=401, content={"detail": "valid API key required"}
+                    )
+                required_scope = _required_scope(request.method, request.url.path)
+                if not principal.allows(required_scope):
+                    status_code = 403
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": f"API key requires {required_scope} scope"},
+                    )
+                request.state.api_principal = principal
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            telemetry = getattr(request.app.state, "telemetry", None)
+            if telemetry is not None:
+                await telemetry.observe(
+                    request.method, request.url.path, status_code, timer.elapsed()
+                )
 
-    @app.get("/api/runtime")
-    async def runtime_state(request: Request) -> list[dict[str, object]]:
-        return await _runtime(request).snapshot()
-
-    @app.post("/api/runtime/{key:path}/cancel")
-    async def cancel_runtime(request: Request, key: str) -> dict[str, object]:
-        try:
-            state = await _runtime(request).cancel(key)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return state.public()
-
-    @app.get("/api/watchlists")
-    async def watchlists(
-        request: Request,
-        limit: Annotated[int, Query(ge=1, le=1000)] = 100,
-    ) -> list[dict[str, object]]:
-        rows = await _intelligence(request).list_watchlists(limit)
-        return [row.model_dump(mode="json") for row in rows]
-
-    @app.post("/api/watchlists", status_code=201)
-    async def create_watchlist(request: Request, values: WatchlistRequest) -> dict[str, object]:
-        intelligence = _intelligence(request)
-        try:
-            watchlist_id = await intelligence.create_watchlist(
-                values.name,
-                values.query,
-                interval_minutes=values.interval_minutes,
-                max_products=values.max_products,
-                max_search_pages=values.max_search_pages,
-            )
-        except aiosqlite.IntegrityError as exc:
-            raise HTTPException(status_code=409, detail="watchlist name already exists") from exc
-        row = await intelligence.get_watchlist(watchlist_id)
-        return row.model_dump(mode="json")
-
-    @app.patch("/api/watchlists/{watchlist_id}")
-    async def update_watchlist(
-        request: Request,
-        watchlist_id: int,
-        values: WatchlistUpdate,
-    ) -> dict[str, object]:
-        intelligence = _intelligence(request)
-        try:
-            await intelligence.get_watchlist(watchlist_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        await intelligence.set_watchlist_enabled(watchlist_id, values.enabled)
-        return (await intelligence.get_watchlist(watchlist_id)).model_dump(mode="json")
-
-    @app.post("/api/watchlists/{watchlist_id}/run", status_code=202)
-    async def run_watchlist(request: Request, watchlist_id: int) -> dict[str, object]:
-        try:
-            state = await _runtime(request).schedule_watchlist(watchlist_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return state.public()
-
-    @app.get("/api/changes")
-    async def changes(
-        request: Request,
-        job_id: int | None = None,
-        limit: Annotated[int, Query(ge=1, le=5000)] = 100,
-    ) -> list[dict[str, object]]:
-        rows = await _intelligence(request).list_changes(job_id=job_id, limit=limit)
-        return [row.model_dump(mode="json") for row in rows]
-
-    @app.get("/api/alerts")
-    async def alerts(
-        request: Request,
-        unread_only: bool = False,
-        limit: Annotated[int, Query(ge=1, le=1000)] = 100,
-    ) -> list[dict[str, object]]:
-        rows = await _control(request).list_alerts(unread_only=unread_only, limit=limit)
-        return [row.model_dump(mode="json") for row in rows]
-
-    @app.post("/api/alerts/{alert_id}/read")
-    async def read_alert(request: Request, alert_id: int) -> dict[str, object]:
-        try:
-            row = await _control(request).mark_alert_read(alert_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return row.model_dump(mode="json")
-
-    @app.get("/api/scoring/profiles")
-    async def scoring_profiles(request: Request) -> list[dict[str, object]]:
-        rows = await _control(request).list_profiles()
-        return [row.model_dump(mode="json") for row in rows]
-
-    @app.post("/api/scoring/profiles", status_code=201)
-    async def create_scoring_profile(
-        request: Request,
-        values: ScoringProfileInput,
-    ) -> dict[str, object]:
-        try:
-            row = await _control(request).create_profile(values)
-        except aiosqlite.IntegrityError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail="scoring profile name already exists",
-            ) from exc
-        return row.model_dump(mode="json")
-
-    @app.post("/api/scoring/profiles/{profile_id}/activate")
-    async def activate_scoring_profile(request: Request, profile_id: int) -> dict[str, object]:
-        try:
-            row = await _control(request).activate_profile(profile_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return row.model_dump(mode="json")
-
-    @app.post("/api/scoring/rescore")
-    async def rescore(request: Request, values: RescoreRequest) -> dict[str, object]:
-        try:
-            count = await _control(request).rescore(
-                profile_id=values.profile_id,
-                job_id=values.job_id,
-            )
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"rescored": count, "profile_id": values.profile_id, "job_id": values.job_id}
-
-    @app.post("/api/landed-cost", response_model=LandedCostResult)
-    async def landed_cost(values: LandedCostInput) -> LandedCostResult:
-        return calculate_landed_cost(values)
-
+    register_core_routes(app)
+    register_production_routes(app)
+    _install_openapi_security(app, require_auth)
     return app
 
 
-def _database(request: Request) -> Database:
-    return request.app.state.database
+async def _watch_scheduler_loop(
+    service: WatchlistService,
+    production: ProductionRepository,
+    control: ControlRepository,
+    poll_seconds: float,
+) -> None:
+    while True:
+        runs = await service.run_due()
+        if runs:
+            await production.rescore_category_profiles(control)
+        await asyncio.sleep(poll_seconds)
 
 
-def _intelligence(request: Request) -> IntelligenceRepository:
-    return request.app.state.intelligence
+def _requires_auth(path: str, auth_required: bool) -> bool:
+    if not auth_required:
+        return False
+    if path == "/api/health/live":
+        return False
+    return path.startswith("/api/") or path == "/metrics"
 
 
-def _control(request: Request) -> ControlRepository:
-    return request.app.state.control
+def _required_scope(method: str, path: str) -> Scope:
+    if path == "/api/auth/session":
+        return "read"
+    if path.startswith("/api/admin/"):
+        return "admin"
+    if method.upper() in {"GET", "HEAD", "OPTIONS"}:
+        return "read"
+    return "write"
 
 
-def _runtime(request: Request) -> RuntimeManager:
-    return request.app.state.runtime
+def _install_openapi_security(app: FastAPI, auth_required: bool) -> None:
+    if not auth_required:
+        return
+    original_openapi = app.openapi
+
+    def secured_openapi() -> dict[str, Any]:
+        schema = original_openapi()
+        components = schema.setdefault("components", {})
+        schemes = components.setdefault("securitySchemes", {})
+        schemes["ApiKeyAuth"] = {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": "AlibabaScraper API key created by the local CLI.",
+        }
+        for path, item in schema.get("paths", {}).items():
+            if not path.startswith("/api/") or path == "/api/health/live":
+                continue
+            for operation in item.values():
+                if isinstance(operation, dict) and "responses" in operation:
+                    operation["security"] = [{"ApiKeyAuth": []}]
+        return schema
+
+    app.openapi = secured_openapi  # type: ignore[method-assign]
