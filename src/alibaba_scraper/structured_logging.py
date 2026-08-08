@@ -1,12 +1,12 @@
 # src/alibaba_scraper/structured_logging.py
 """Structured JSON logging with bounded rotating-file retention."""
 
+import datetime
 import json
 import logging
-from datetime import UTC, datetime
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from typing import Any
+import logging.handlers
+import pathlib
+import typing
 
 
 _STANDARD_FIELDS = {
@@ -36,8 +36,8 @@ _STANDARD_FIELDS = {
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        payload: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
+        payload: dict[str, typing.Any] = {
+            "timestamp": datetime.datetime.fromtimestamp(record.created, datetime.UTC).isoformat(),
             "level": record.levelname.lower(),
             "logger": record.name,
             "message": record.getMessage(),
@@ -56,7 +56,7 @@ class JsonFormatter(logging.Formatter):
 def configure_logging(
     *,
     level: str = "INFO",
-    path: Path | str | None = None,
+    path: pathlib.Path | str | None = None,
     max_bytes: int = 10 * 1024 * 1024,
     backup_count: int = 7,
 ) -> None:
@@ -75,9 +75,9 @@ def configure_logging(
     root.addHandler(stream)
 
     if path is not None:
-        log_path = Path(path)
+        log_path = pathlib.Path(path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = RotatingFileHandler(
+        file_handler = logging.handlers.RotatingFileHandler(
             log_path,
             maxBytes=max_bytes,
             backupCount=backup_count,
@@ -92,7 +92,7 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def _safe(value: Any) -> Any:
+def _safe(value: typing.Any) -> typing.Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, (list, tuple)):
