@@ -158,14 +158,12 @@ async def migrate_database(path: Path | str) -> list[int]:
 async def schema_version(path: Path | str) -> int:
     """Return the highest applied migration version, or zero for an unmigrated DB."""
     database_path = Path(path)
-    if not database_path.exists():
+    if not await asyncio.to_thread(database_path.exists):
         return 0
     connection = await aiosqlite.connect(database_path)
     try:
         row = await (
-            await connection.execute(
-                "SELECT MAX(version) FROM schema_migrations"
-            )
+            await connection.execute("SELECT MAX(version) FROM schema_migrations")
         ).fetchone()
     except aiosqlite.OperationalError:
         return 0
