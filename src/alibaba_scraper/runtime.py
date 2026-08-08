@@ -142,7 +142,7 @@ class RuntimeManager:
             state.result = summary.model_dump(mode="json")
             state.status = "completed"
         except asyncio.CancelledError:
-            await self._mark_job_cancelled(state.target_id)
+            await asyncio.shield(self._mark_job_cancelled(state.target_id))
             state.status = "cancelled"
             raise
         except Exception as exc:  # noqa: BLE001 - surfaced in runtime state
@@ -173,10 +173,11 @@ class RuntimeManager:
             state.completed_at = datetime.now(UTC)
 
     async def _mark_job_cancelled(self, job_id: int) -> None:
-        """Persist cancellation using a short independent WAL write transaction."""
+        """Rollback interrupted work and persist cancellation on the existing connection."""
         now = datetime.now(UTC).isoformat()
-        async with Database(self.database.path) as database:
-            await database.connection.execute(
+        async with self.database._write_lock:
+            await self.database.connection.rollback()
+            await self.database.connection.execute(
                 """
                 UPDATE crawl_jobs
                    SET status = 'cancelled', updated_at = ?, completed_at = ?
@@ -184,7 +185,7 @@ class RuntimeManager:
                 """,
                 (now, now, job_id),
             )
-            await database.connection.execute(
+            await self.database.connection.execute(
                 """
                 UPDATE crawl_queue
                    SET status = 'pending', updated_at = ?
@@ -192,4 +193,4 @@ class RuntimeManager:
                 """,
                 (now, job_id),
             )
-            await database.connection.commit()
+            await self.database.connection.commit()
