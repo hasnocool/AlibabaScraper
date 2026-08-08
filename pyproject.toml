@@ -4,32 +4,36 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alibaba-scraper"
-version = "0.1.0"
-description = "Async-first Alibaba public product data collection toolkit"
+version = "0.5.0"
+description = "Authenticated Alibaba sourcing research and production operations toolkit"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "hasnocool" }]
 dependencies = [
+  "aiosqlite>=0.22.1",
+  "fastapi==0.141.1",
   "httpx[http2]>=0.28.1",
-  "pydantic>=2.11",
-  "pydantic-settings>=2.10",
-  "selectolax>=0.3.30",
-  "typer>=0.16",
+  "pydantic>=2.13.4",
+  "pydantic-settings>=2.15.0",
+  "selectolax>=0.4.11",
+  "typer>=0.27.1",
+  "uvicorn==0.52.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.4",
-  "pytest-asyncio>=1.1",
-  "ruff>=0.12",
+  "pytest>=9.1.1",
+  "pytest-asyncio>=1.4.0",
+  "ruff>=0.16.2",
 ]
 browser = [
   "playwright>=1.54",
 ]
 
 [project.scripts]
-alibaba-scraper = "alibaba_scraper.cli:app"
+alibaba-scraper = "alibaba_scraper.cli_v04:app"
+alibaba-service = "alibaba_scraper.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/alibaba_scraper"]
