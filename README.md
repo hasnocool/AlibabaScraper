@@ -28,7 +28,13 @@ alibaba-scraper --help
 ## Example
 
 ```bash
-alibaba-scraper fetch "https://www.alibaba.com/product-detail/..." --format json
+alibaba-scraper fetch "https://www.alibaba.com/product-detail/..."
+```
+
+Write JSON directly to a file:
+
+```bash
+alibaba-scraper fetch "https://www.alibaba.com/product-detail/..." --output data/product.json
 ```
 
 ## Architecture
