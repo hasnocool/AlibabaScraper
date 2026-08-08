@@ -1,4 +1,3 @@
-# tests/test_migrations_v05.py
 from pathlib import Path
 
 import aiosqlite
@@ -8,9 +7,9 @@ from alibaba_scraper.migrations import CURRENT_SCHEMA_VERSION, migrate_database,
 
 async def test_migrations_are_idempotent_and_versioned(tmp_path: Path) -> None:
     path = tmp_path / "migrations.sqlite3"
-    assert await migrate_database(path) == [1]
+    assert await migrate_database(path) == [1, 2]
     assert await migrate_database(path) == []
-    assert await schema_version(path) == CURRENT_SCHEMA_VERSION == 1
+    assert await schema_version(path) == CURRENT_SCHEMA_VERSION == 2
 
     async with aiosqlite.connect(path) as connection:
         rows = await (
@@ -24,3 +23,4 @@ async def test_migrations_are_idempotent_and_versioned(tmp_path: Path) -> None:
     assert "landed_cost_scenarios" in names
     assert "category_scoring_bindings" in names
     assert "alert_sinks" in names
+    assert "supplier_quality_snapshots" in names

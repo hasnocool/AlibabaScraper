@@ -105,6 +105,43 @@ MIGRATIONS = (
             ON alert_deliveries(status, id);
         """,
     ),
+    Migration(
+        2,
+        "operational_resilience",
+        """
+        ALTER TABLE api_keys ADD COLUMN kind TEXT NOT NULL DEFAULT 'persistent';
+        ALTER TABLE api_keys ADD COLUMN parent_key_id INTEGER;
+        ALTER TABLE api_keys ADD COLUMN rotated_from_id INTEGER;
+        ALTER TABLE api_keys ADD COLUMN rotated_to_id INTEGER;
+
+        ALTER TABLE alert_sinks ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 5;
+        ALTER TABLE alert_sinks ADD COLUMN base_backoff_seconds REAL NOT NULL DEFAULT 30;
+        ALTER TABLE alert_sinks ADD COLUMN max_backoff_seconds REAL NOT NULL DEFAULT 3600;
+
+        ALTER TABLE alert_deliveries ADD COLUMN next_attempt_at TEXT;
+        ALTER TABLE alert_deliveries ADD COLUMN dead_lettered_at TEXT;
+        CREATE INDEX IF NOT EXISTS idx_alert_deliveries_retry
+            ON alert_deliveries(status,next_attempt_at,dead_lettered_at);
+
+        CREATE TABLE IF NOT EXISTS supplier_quality_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_key TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            product_count INTEGER NOT NULL,
+            scored_products INTEGER NOT NULL,
+            avg_score REAL NOT NULL,
+            completeness_pct REAL NOT NULL,
+            changes_30d INTEGER NOT NULL,
+            stability_score REAL NOT NULL,
+            catalog_breadth_score REAL NOT NULL,
+            quality_score REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_supplier_quality_history
+            ON supplier_quality_snapshots(supplier_key,observed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_supplier_quality_rank
+            ON supplier_quality_snapshots(quality_score DESC,observed_at DESC);
+        """,
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version

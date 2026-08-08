@@ -25,8 +25,8 @@ def test_service_requires_key_and_supports_cookie_session(tmp_path: Path) -> Non
         headers = {"X-API-Key": api_key}
         health = client.get("/api/health", headers=headers)
         assert health.status_code == 200
-        assert health.json()["version"] == "0.5.0"
-        assert health.json()["schema_version"] == 1
+        assert health.json()["version"] == "0.6.0"
+        assert health.json()["schema_version"] == 2
 
         session = client.post("/api/auth/session", headers=headers)
         assert session.status_code == 200

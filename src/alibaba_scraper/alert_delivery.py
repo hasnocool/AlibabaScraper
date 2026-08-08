@@ -1,5 +1,5 @@
 # src/alibaba_scraper/alert_delivery.py
-"""Configurable external alert delivery with webhook retry bookkeeping."""
+"""External alert delivery with exponential backoff and dead-letter handling."""
 
 import asyncio
 import hashlib
@@ -10,8 +10,10 @@ from typing import Any
 import httpx
 
 from .production import ProductionRepository
+from .structured_logging import get_logger
 
 _SEVERITY = {"info": 0, "warning": 1, "error": 2}
+_LOG = get_logger(__name__)
 
 
 async def deliver_pending_alerts(
@@ -21,25 +23,21 @@ async def deliver_pending_alerts(
     timeout_seconds: float = 10.0,
     client: httpx.AsyncClient | None = None,
 ) -> dict[str, int]:
-    """Deliver pending alerts to configured webhook sinks."""
+    """Deliver alerts whose retry window is due, moving exhausted failures to DLQ."""
     owned = client is None
     if client is None:
         client = httpx.AsyncClient(timeout=timeout_seconds)
-    delivered = failed = skipped = 0
+    delivered = failed = skipped = dead_lettered = 0
     try:
         for row in await production.pending_deliveries(limit):
             kinds = json.loads(row["event_kinds_json"] or "[]")
             if kinds and row["kind"] not in kinds:
                 skipped += 1
-                await production.record_delivery(
-                    row["alert_id"], row["sink_id"], success=True
-                )
+                await production.record_delivery(row["alert_id"], row["sink_id"], success=True)
                 continue
             if _SEVERITY.get(row["severity"], 0) < _SEVERITY.get(row["minimum_severity"], 0):
                 skipped += 1
-                await production.record_delivery(
-                    row["alert_id"], row["sink_id"], success=True
-                )
+                await production.record_delivery(row["alert_id"], row["sink_id"], success=True)
                 continue
             payload: dict[str, Any] = {
                 "id": row["alert_id"],
@@ -64,22 +62,45 @@ async def deliver_pending_alerts(
                 response = await client.post(row["endpoint"], content=body, headers=headers)
                 response.raise_for_status()
             except Exception as exc:  # noqa: BLE001 - persisted for operator review
-                failed += 1
-                await production.record_delivery(
+                status = await production.record_delivery(
                     row["alert_id"],
                     row["sink_id"],
                     success=False,
                     error=f"{type(exc).__name__}: {exc}",
                 )
+                if status == "dead_letter":
+                    dead_lettered += 1
+                else:
+                    failed += 1
+                _LOG.warning(
+                    "alert delivery failed",
+                    extra={
+                        "event": "alert_delivery_failed",
+                        "alert_id": row["alert_id"],
+                        "sink_id": row["sink_id"],
+                        "delivery_status": status,
+                    },
+                )
             else:
                 delivered += 1
-                await production.record_delivery(
-                    row["alert_id"], row["sink_id"], success=True
+                await production.record_delivery(row["alert_id"], row["sink_id"], success=True)
+                _LOG.info(
+                    "alert delivered",
+                    extra={
+                        "event": "alert_delivered",
+                        "alert_id": row["alert_id"],
+                        "sink_id": row["sink_id"],
+                    },
                 )
     finally:
         if owned:
             await client.aclose()
-    return {"delivered": delivered, "failed": failed, "skipped": skipped}
+    return {
+        "delivered": delivered,
+        "failed": failed,
+        "skipped": skipped,
+        "dead_lettered": dead_lettered,
+    }
 
 
 class AlertDispatcher:
