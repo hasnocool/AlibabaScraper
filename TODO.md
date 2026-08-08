@@ -1,25 +1,27 @@
 # TODO
 
-## 0.3 completed
+## 0.4 control plane ✅
 
-- [x] Capture sanitized regression fixtures from current public Alibaba layouts.
-- [x] Add CSV and JSONL bulk exports from SQLite.
-- [x] Add product-change diff reports beyond price/MOQ.
-- [x] Add supplier tables and supplier-to-product relationships.
-- [x] Add saved search watchlists and recurring recrawls.
-- [x] Add a non-blocking watch daemon.
-- [x] Add search/product sourcing/deal scoring.
-- [x] Add support for additional current public Alibaba product URL shapes.
+- [x] FastAPI service layer.
+- [x] Web dashboard.
+- [x] CLI dashboard mirroring the same data/control plane.
+- [x] Live crawl start/resume/cancel controls.
+- [x] Product browser and scoring filters.
+- [x] Supplier browser.
+- [x] Watchlist alert inbox.
+- [x] Generic landed-cost calculator.
+- [x] Configurable scoring profiles and profile-specific rescoring.
+- [x] Update version, README, CHANGELOG, TODO, roadmap, and service docs.
 
 ## Next
 
+- [ ] Add schema migrations instead of only `CREATE TABLE IF NOT EXISTS` initialization.
+- [ ] Add API authentication before supporting non-localhost deployment.
+- [ ] Add pagination metadata and richer product comparison views.
+- [ ] Add pluggable alert delivery adapters after local alert acknowledgement is stable.
+- [ ] Add regional landed-cost presets while keeping all rates visible/editable.
+- [ ] Add service health metrics, crawl throughput, request latency, and queue depth charts.
+- [ ] Add structured crawl retry/error controls from the dashboard.
 - [ ] Add optional Playwright normal-browser rendering for JavaScript-only public pages.
-- [ ] Add FastAPI service and web dashboard.
-- [ ] Add a mirrored interactive CLI dashboard.
-- [ ] Add configurable scoring weights and category-specific scoring profiles.
-- [ ] Add landed-cost inputs: shipping, duties, exchange rate, packaging, and target quantity.
-- [ ] Add supplier quality history from observed public signals.
-- [ ] Add alert sinks for meaningful watchlist changes.
-- [ ] Add PostgreSQL adapter for larger datasets and multi-process workers.
-- [ ] Add migration/version metadata for evolving SQLite schemas.
-- [ ] Add more sanitized live-layout fixtures across unrelated Alibaba categories.
+- [ ] Add packaged systemd/service installer and process-health commands.
+- [ ] Add PostgreSQL adapter only if SQLite becomes a measured bottleneck.

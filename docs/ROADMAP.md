@@ -4,60 +4,53 @@
 
 - Async HTTP client and bounded concurrency.
 - Normalized product model.
-- Basic page parser.
-- JSON output.
-- Unit tests and CI.
+- Basic parser, JSON output, tests, and CI.
 
 ## 0.2 — Discovery + historical storage ✅
 
-- Current search-result adapter.
-- Product URL canonicalization and product IDs.
+- Current search discovery and canonical product IDs/URLs.
 - Resumable crawl jobs and persistent queues.
-- Product and supplier metadata extraction.
-- Price ranges, quantity tiers, MOQ, attributes, and categories.
-- SQLite WAL persistence.
-- Change-only price/MOQ history.
+- Product/supplier metadata, price tiers, MOQ, attributes, categories.
+- SQLite WAL persistence and change-only price/MOQ history.
 - Retry/backoff and globally spaced async request starts.
 
-## 0.3 — Data platform + watchlists + sourcing intelligence ✅
+## 0.3 — Data platform + sourcing intelligence ✅
 
-- Sanitized current-layout regression fixtures.
-- Dedicated supplier model and supplier-product relationships.
-- CSV/JSONL export from persisted data.
-- Product field-diff history beyond pricing.
-- Saved searches and recurring watchlists.
-- Watchlist run history and change counts.
-- Non-blocking automatic recrawl daemon.
-- Peer-relative sourcing/deal scores.
-- Additional current public Alibaba product URL shapes.
+- Supplier model and supplier-product relationships.
+- CSV/JSONL exports.
+- Product field-change history.
+- Saved searches/watchlists and recurring recrawls.
+- Sourcing/deal component scoring.
+- Current-layout regression fixtures.
 
-## 0.4 — Rendering + service
+## 0.4 — Service + dashboards ✅
 
-- Optional Playwright adapter for public pages that require JavaScript rendering.
-- Local FastAPI service.
-- Job-control API.
-- Product/supplier browser.
-- Saved searches and watchlist control.
-- Price/MOQ/change trend charts.
-- Scraper health and crawl telemetry.
-- Mirrored CLI dashboard.
+- FastAPI service and OpenAPI docs.
+- Browser control dashboard.
+- Terminal dashboard.
+- Live crawl start/resume/cancel control.
+- Product/supplier browsing and score filters.
+- Configurable scoring profiles and persisted profile scores.
+- Watchlist/high-score alert inbox.
+- Generic landed-cost calculations.
 
-## 0.5 — Sourcing intelligence expansion
+## 0.5 — Operations + comparison
 
-- Supplier quality history and public-signal scoring.
-- Landed-cost model: shipping, duty, exchange rate, packaging, target quantity.
-- Configurable/category-specific scoring weights.
-- Product change alerts and notification sinks.
-- Search-result ranking and sourcing shortlists.
-- Comparison reports across suppliers and products.
+- Explicit schema migrations.
+- Service install/upgrade/uninstall scripts and systemd integration.
+- Dashboard crawl telemetry and performance charts.
+- Product comparison and sourcing shortlists.
+- Retry/error queue management.
+- Alert delivery adapter interface.
+- Landed-cost preset profiles with visible assumptions.
 
-## 0.6 — Scale
+## 0.6 — Rendering + scale
 
-- PostgreSQL persistence adapter.
-- Multi-process/distributed workers with safe leases.
-- Schema migration/version tooling.
-- Retention policies and compressed archival exports.
+- Optional Playwright normal-browser rendering for public JavaScript-only pages.
+- Optional PostgreSQL persistence when measured workload warrants it.
+- Multi-worker service coordination without duplicate crawl execution.
+- API authentication/authorization for intentionally remote deployments.
 
 ## Guardrails
 
-This project is for collecting data made publicly accessible by the target site. It should honor applicable terms, robots directives, rate limits, and access controls. Do not add CAPTCHA bypass, authentication bypass, fingerprint spoofing, or other anti-abuse circumvention features.
+This project is for data made publicly accessible by the target site. It should honor applicable terms, robots directives, rate limits, and access controls. Do not add CAPTCHA bypass, authentication bypass, fingerprint spoofing, or other anti-abuse circumvention features.

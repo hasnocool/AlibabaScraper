@@ -55,7 +55,14 @@ class SearchResult(BaseModel):
     title: str | None = None
 
 
-CrawlStatus = Literal["pending", "running", "completed", "completed_with_errors", "failed"]
+CrawlStatus = Literal[
+    "pending",
+    "running",
+    "completed",
+    "completed_with_errors",
+    "failed",
+    "cancelled",
+]
 QueueStatus = Literal["pending", "in_progress", "done", "error"]
 
 

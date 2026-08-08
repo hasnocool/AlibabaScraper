@@ -1,15 +1,46 @@
 # src/alibaba_scraper/scoring.py
 """Deterministic product sourcing/deal scoring."""
 
+from dataclasses import dataclass
 from decimal import Decimal
 
 from .models import ProductRecord, SourcingScore
+
+
+@dataclass(frozen=True)
+class ScoreWeights:
+    """Relative component weights; values are normalized before use."""
+
+    price_value: float = 35.0
+    moq: float = 20.0
+    supplier_confidence: float = 20.0
+    tier_discount: float = 10.0
+    data_quality: float = 15.0
+
+    def normalized(self) -> "ScoreWeights":
+        total = (
+            self.price_value
+            + self.moq
+            + self.supplier_confidence
+            + self.tier_discount
+            + self.data_quality
+        )
+        if total <= 0:
+            raise ValueError("scoring weights must have a positive total")
+        return ScoreWeights(
+            price_value=self.price_value / total,
+            moq=self.moq / total,
+            supplier_confidence=self.supplier_confidence / total,
+            tier_discount=self.tier_discount / total,
+            data_quality=self.data_quality / total,
+        )
 
 
 def score_product(
     record: ProductRecord,
     *,
     peer_median_price: Decimal | None = None,
+    weights: ScoreWeights | None = None,
 ) -> SourcingScore:
     """Score sourcing attractiveness without making financial-return claims."""
     price_value = _price_value_score(record, peer_median_price)
@@ -17,13 +48,14 @@ def score_product(
     supplier = _supplier_score(record)
     tier_discount = _tier_discount_score(record)
     data_quality = _data_quality_score(record)
+    normalized = (weights or ScoreWeights()).normalized()
 
     total = (
-        price_value * 0.35
-        + moq * 0.20
-        + supplier * 0.20
-        + tier_discount * 0.10
-        + data_quality * 0.15
+        price_value * normalized.price_value
+        + moq * normalized.moq
+        + supplier * normalized.supplier_confidence
+        + tier_discount * normalized.tier_discount
+        + data_quality * normalized.data_quality
     )
     reasons = _reasons(record, peer_median_price, price_value, moq, tier_discount)
     return SourcingScore(
