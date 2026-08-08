@@ -8,7 +8,6 @@ import logging.handlers
 import pathlib
 import typing
 
-
 _STANDARD_FIELDS = {
     "name",
     "msg",
