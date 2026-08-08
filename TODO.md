@@ -1,22 +1,25 @@
 # TODO
 
-## 0.2 follow-up
+## 0.3 completed
 
-- [x] Add current Alibaba search-result discovery.
-- [x] Extract and canonicalize product IDs and URLs.
-- [x] Extract supplier details, prices, MOQ, categories, attributes, and images.
-- [x] Add retry/backoff for transient HTTP failures.
-- [x] Add crawl checkpoint/resume support.
-- [x] Add SQLite persistence with async access.
-- [x] Add price/MOQ history.
+- [x] Capture sanitized regression fixtures from current public Alibaba layouts.
+- [x] Add CSV and JSONL bulk exports from SQLite.
+- [x] Add product-change diff reports beyond price/MOQ.
+- [x] Add supplier tables and supplier-to-product relationships.
+- [x] Add saved search watchlists and recurring recrawls.
+- [x] Add a non-blocking watch daemon.
+- [x] Add search/product sourcing/deal scoring.
+- [x] Add support for additional current public Alibaba product URL shapes.
 
 ## Next
 
-- [ ] Capture real response fixtures from several public Alibaba categories and grow parser regression coverage.
-- [ ] Add CSV and JSONL bulk exports from SQLite.
-- [ ] Add product-change diff reports beyond price/MOQ.
-- [ ] Add supplier tables and supplier-to-product relationships.
 - [ ] Add optional Playwright normal-browser rendering for JavaScript-only public pages.
-- [ ] Add scheduled watchlists for searches and products.
-- [ ] Add FastAPI service and dashboard.
-- [ ] Add search/product quality scoring and sourcing analytics.
+- [ ] Add FastAPI service and web dashboard.
+- [ ] Add a mirrored interactive CLI dashboard.
+- [ ] Add configurable scoring weights and category-specific scoring profiles.
+- [ ] Add landed-cost inputs: shipping, duties, exchange rate, packaging, and target quantity.
+- [ ] Add supplier quality history from observed public signals.
+- [ ] Add alert sinks for meaningful watchlist changes.
+- [ ] Add PostgreSQL adapter for larger datasets and multi-process workers.
+- [ ] Add migration/version metadata for evolving SQLite schemas.
+- [ ] Add more sanitized live-layout fixtures across unrelated Alibaba categories.

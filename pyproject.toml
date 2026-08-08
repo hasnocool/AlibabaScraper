@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alibaba-scraper"
-version = "0.2.0"
-description = "Async-first Alibaba public product discovery and historical data toolkit"
+version = "0.3.0"
+description = "Async-first Alibaba public product discovery and sourcing intelligence toolkit"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }

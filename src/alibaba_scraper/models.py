@@ -1,5 +1,5 @@
 # src/alibaba_scraper/models.py
-"""Normalized data models used by the crawler and persistence layers."""
+"""Normalized data models used by crawler, intelligence, and persistence layers."""
 
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -95,3 +95,71 @@ class CrawlSummary(BaseModel):
     completed: int
     errors: int
     pending: int
+
+
+class SupplierRecord(BaseModel):
+    """Normalized supplier entry with its observed product count."""
+
+    supplier_key: str
+    name: str
+    url: str | None = None
+    country: str | None = None
+    product_count: int = 0
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+
+class ProductChange(BaseModel):
+    """One normalized field change detected between product observations."""
+
+    id: int | None = None
+    product_key: str
+    job_id: int | None = None
+    field: str
+    old_value: str | None = None
+    new_value: str | None = None
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class SourcingScore(BaseModel):
+    """Deterministic sourcing/deal score and component breakdown."""
+
+    product_key: str | None = None
+    job_id: int | None = None
+    total: float
+    price_value: float
+    moq: float
+    supplier_confidence: float
+    tier_discount: float
+    data_quality: float
+    peer_median_price: Decimal | None = None
+    reasons: list[str] = Field(default_factory=list)
+    scored_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class Watchlist(BaseModel):
+    """Saved search that can be recrawled on a recurring interval."""
+
+    id: int
+    name: str
+    query: str
+    enabled: bool
+    interval_minutes: int
+    max_products: int
+    max_search_pages: int
+    last_run_at: datetime | None = None
+    next_run_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class WatchlistRun(BaseModel):
+    """Result of running one watchlist crawl."""
+
+    id: int
+    watchlist_id: int
+    job_id: int | None = None
+    status: str
+    changes_count: int
+    started_at: datetime
+    completed_at: datetime | None = None

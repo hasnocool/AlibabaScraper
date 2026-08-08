@@ -19,14 +19,17 @@
 - Change-only price/MOQ history.
 - Retry/backoff and globally spaced async request starts.
 
-## 0.3 — Data platform
+## 0.3 — Data platform + watchlists + sourcing intelligence ✅
 
+- Sanitized current-layout regression fixtures.
 - Dedicated supplier model and supplier-product relationships.
 - CSV/JSONL export from persisted data.
 - Product field-diff history beyond pricing.
-- Crawl error ledger/reporting and retry controls.
-- Saved searches and watchlists.
-- Query/report CLI commands.
+- Saved searches and recurring watchlists.
+- Watchlist run history and change counts.
+- Non-blocking automatic recrawl daemon.
+- Peer-relative sourcing/deal scores.
+- Additional current public Alibaba product URL shapes.
 
 ## 0.4 — Rendering + service
 
@@ -34,17 +37,26 @@
 - Local FastAPI service.
 - Job-control API.
 - Product/supplier browser.
-- Search filters and saved queries.
-- Price/MOQ trend charts.
+- Saved searches and watchlist control.
+- Price/MOQ/change trend charts.
 - Scraper health and crawl telemetry.
+- Mirrored CLI dashboard.
 
-## 0.5 — Sourcing intelligence
+## 0.5 — Sourcing intelligence expansion
 
-- Supplier quality signals.
-- Landed-cost input model.
-- Price/MOQ opportunity scoring.
-- Product change alerts.
-- Search result ranking and sourcing shortlists.
+- Supplier quality history and public-signal scoring.
+- Landed-cost model: shipping, duty, exchange rate, packaging, target quantity.
+- Configurable/category-specific scoring weights.
+- Product change alerts and notification sinks.
+- Search-result ranking and sourcing shortlists.
+- Comparison reports across suppliers and products.
+
+## 0.6 — Scale
+
+- PostgreSQL persistence adapter.
+- Multi-process/distributed workers with safe leases.
+- Schema migration/version tooling.
+- Retention policies and compressed archival exports.
 
 ## Guardrails
 

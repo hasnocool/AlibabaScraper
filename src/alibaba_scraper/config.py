@@ -22,4 +22,4 @@ class Settings(BaseSettings):
     max_retries: int = Field(default=3, ge=0, le=10)
     retry_backoff_seconds: float = Field(default=1.0, ge=0.1, le=60.0)
     database_path: Path = Path("data/alibaba.sqlite3")
-    user_agent: str = "AlibabaScraper/0.2 (+public-data-research)"
+    user_agent: str = "AlibabaScraper/0.3 (+public-data-research)"

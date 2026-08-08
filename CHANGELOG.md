@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The project follows Semantic Versioning.
 
+## [0.3.0] - 2026-08-08
+
+### Added
+
+- Sanitized regression fixtures derived from current public Alibaba tier-pricing layouts.
+- CSV and JSONL exports from persisted product snapshots.
+- Dedicated supplier table and supplier-to-product relationships.
+- Field-level product change detection beyond price/MOQ observations.
+- Saved search watchlists with due scheduling, manual runs, and continuous daemon mode.
+- Watchlist run history and per-run change counts.
+- Deterministic sourcing/deal scores with peer-relative price, MOQ, supplier, tier-discount, and data-quality components.
+- CLI commands for exports, suppliers, changes, scores, and watchlist management.
+- Support for public `product-introduction` and `wholesaler.alibaba.com/product-detail` URL shapes.
+
+### Changed
+
+- Crawl orchestration now automatically updates supplier relationships, change events, and sourcing scores.
+- Version bumped from 0.2.0 to 0.3.0.
+
 ## [0.2.0] - 2026-08-08
 
 ### Added

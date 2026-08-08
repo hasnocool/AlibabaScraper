@@ -1,11 +1,11 @@
 # AlibabaScraper
 
-Async-first Python 3.12 toolkit for discovering, normalizing, and tracking publicly accessible Alibaba product and supplier data.
+Async-first Python 3.12 toolkit for discovering, normalizing, tracking, exporting, and scoring publicly accessible Alibaba product and supplier data.
 
 ## Pipeline
 
 ```text
-search query
+saved search / one-off query
    ↓
 Alibaba search pages
    ↓
@@ -19,20 +19,28 @@ JSON-LD + conservative HTML fallbacks
    ↓
 product / supplier / price / MOQ normalization
    ↓
-products + change-only price/MOQ history
+product snapshots + field changes + supplier relationships
+   ↓
+peer-relative sourcing score
+   ↓
+CSV / JSONL / watchlist recrawls
 ```
 
 ## Current capabilities
 
-- Public Alibaba product search discovery using the current `/search/page` URL shape.
-- Canonicalization and deduplication of `/product-detail/..._<id>.html` URLs.
+- Public Alibaba search discovery with product-detail and product-introduction URL support.
+- Canonicalization and deduplication of public Alibaba product URLs.
 - Async HTTP/2 collection with globally spaced request starts, bounded concurrency, retry/backoff, and no blocking sleeps.
-- Product title, numeric product ID, supplier name/URL, origin, category, images, attributes, price range, quantity-price tiers, and MOQ extraction.
-- JSON-LD first, with isolated HTML fallbacks for markup changes.
-- SQLite WAL storage using `aiosqlite`.
-- Current product snapshots plus history rows only when tracked price/MOQ values change.
-- Persisted crawl jobs and queues that can safely recover URLs left `in_progress` after interruption.
-- CLI commands for crawling, resuming, listing jobs, inspecting history, and fetching a single product.
+- Product title, ID, supplier, origin, category, images, attributes, price range, quantity tiers, and MOQ extraction.
+- JSON-LD first with isolated HTML fallbacks.
+- Sanitized regression fixtures derived from current public Alibaba page layouts.
+- SQLite WAL storage with separate async connections for crawl state and derived intelligence.
+- Current product snapshots, price/MOQ observations, and normalized field-level change events.
+- Supplier table plus supplier-to-product relationships.
+- Saved search watchlists, due scheduling, manual recrawls, and a non-blocking watch daemon.
+- Deterministic sourcing/deal scoring using peer price, MOQ, supplier completeness, tier discount, and data quality.
+- CSV and JSONL exports including current sourcing scores.
+- Persisted crawl jobs and queues that recover `in_progress` work after interruption.
 
 ## Install
 
@@ -43,48 +51,94 @@ python -m pip install -U pip
 pip install -e '.[dev]'
 ```
 
-## Crawl a search
+## Crawl and score a search
 
 ```bash
 alibaba-scraper crawl "solar panel" --limit 100 --pages 5
+alibaba-scraper scores --limit 25
 ```
 
 The default database is `data/alibaba.sqlite3`.
 
-Use a different database:
+## Export data
 
 ```bash
-alibaba-scraper crawl "solar panel" --database data/research.sqlite3 --limit 250 --pages 10
+alibaba-scraper export data/products.jsonl --format jsonl
+alibaba-scraper export data/products.csv --format csv
 ```
 
-## Resume a job
+Exports include the normalized product payload and, when available, the latest sourcing score.
+
+## Suppliers
+
+```bash
+alibaba-scraper suppliers --limit 50
+alibaba-scraper supplier-products supplier:<key>
+```
+
+Supplier identities are normalized from supplier URL when available, otherwise from name/country. Products are linked through a many-to-many relationship table.
+
+## Changes
+
+```bash
+alibaba-scraper changes --limit 100
+alibaba-scraper changes --job-id 12
+alibaba-scraper history 1601732011579
+```
+
+`history` shows price/MOQ observations. `changes` reports normalized field changes including title, supplier, category, price, MOQ, and attributes.
+
+## Saved searches / watchlists
+
+Create a saved search that is immediately due for its first run:
+
+```bash
+alibaba-scraper watch-add "solar-panels" "solar panel" --every-minutes 360 --limit 100 --pages 5
+```
+
+Inspect and run watchlists:
+
+```bash
+alibaba-scraper watchlists
+alibaba-scraper watch-run 1
+alibaba-scraper watch-run-due
+```
+
+Run automatic recrawls continuously:
+
+```bash
+alibaba-scraper watch-daemon --poll-seconds 60
+```
+
+The daemon uses `asyncio.sleep()` and async database/network operations; it does not busy-wait or block the event loop.
+
+## Resume a crawl
 
 ```bash
 alibaba-scraper jobs
 alibaba-scraper resume 1
 ```
 
-If a process stopped while URLs were marked `in_progress`, resuming the job returns those URLs to the pending queue before continuing.
-
-## Price / MOQ history
-
-```bash
-alibaba-scraper history 1601732011579
-```
-
-A history row is added only when the normalized tracked values change, so repeated identical crawls do not create needless history noise.
+If a process stopped while URLs were `in_progress`, resume returns them to the pending queue before continuing.
 
 ## Fetch one product
 
 ```bash
 alibaba-scraper fetch "https://www.alibaba.com/product-detail/..._1601732011579.html"
-```
-
-Write normalized JSON:
-
-```bash
 alibaba-scraper fetch "https://www.alibaba.com/product-detail/..._1601732011579.html" -o data/product.json
 ```
+
+## Sourcing score
+
+The score is a deterministic prioritization signal, not a guarantee of product quality, supplier reliability, profitability, or landed cost. The current 0-100 score combines:
+
+- 35% minimum price versus the same-currency median in the crawl.
+- 20% MOQ flexibility.
+- 20% supplier identity completeness.
+- 10% quantity-tier discount depth.
+- 15% normalized data completeness.
+
+Future versions can add shipping/landed cost, supplier history, certification validation, and user-defined scoring weights.
 
 ## Runtime controls
 
@@ -99,18 +153,28 @@ Copy `.env.example` to `.env` and tune:
 
 Defaults intentionally favor low resource usage and conservative request rates.
 
-## Data model
+## SQLite data model
 
-SQLite stores three main groups of data:
+Core crawl tables:
 
-- `products`: latest normalized state for each product.
-- `product_observations`: historical price/MOQ changes.
-- `crawl_jobs` + `crawl_queue`: resumable collection state.
+- `products`
+- `product_observations`
+- `crawl_jobs`
+- `crawl_queue`
 
-## Site behavior
+Derived intelligence tables:
 
-Alibaba can change its page markup and may render some pages dynamically. Parsers are deliberately isolated and prioritize structured metadata. An optional normal-browser rendering adapter remains on the roadmap for pages that require JavaScript rendering; the project does not implement CAPTCHA bypass, authentication bypass, fingerprint spoofing, or other anti-abuse circumvention.
+- `suppliers`
+- `supplier_products`
+- `product_changes`
+- `product_scores`
+- `watchlists`
+- `watchlist_runs`
 
-The collector should be operated in accordance with applicable site terms, robots directives, rate limits, and access controls.
+## Site behavior and guardrails
+
+Alibaba can change markup and may render some pages dynamically. Parsers are isolated and prioritize structured metadata. An optional normal-browser rendering adapter remains on the roadmap for public pages that require JavaScript rendering.
+
+Operate the collector in accordance with applicable site terms, robots directives, rate limits, and access controls. The project does not implement CAPTCHA bypass, authentication bypass, fingerprint spoofing, or other anti-abuse circumvention.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md).
