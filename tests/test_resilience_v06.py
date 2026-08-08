@@ -74,7 +74,12 @@ async def test_supplier_quality_history_uses_observed_catalog_data(tmp_path: Pat
         ResilienceRepository(path) as resilience,
     ):
         product_key = await database.upsert_product(record)
-        await intelligence.record_product(record, product_key, None, None)
+        await intelligence.record_product(
+            record,
+            product_key,
+            previous=None,
+            job_id=None,
+        )
         suppliers = await intelligence.list_suppliers()
         assert len(suppliers) == 1
         snapshots = await resilience.snapshot_supplier_quality()
