@@ -1,5 +1,5 @@
 # src/alibaba_scraper/service_core_routes.py
-"""Core v0.4-compatible API and dashboard routes."""
+"""Core-compatible API and dashboard routes."""
 
 from decimal import Decimal
 from typing import Annotated
@@ -70,7 +70,7 @@ def register_core_routes(app: FastAPI) -> None:
 
     @app.get("/api/health/live")
     async def health_live() -> dict[str, object]:
-        return {"status": "ok", "version": "0.5.0"}
+        return {"status": "ok", "version": "0.6.0"}
 
     @app.get("/api/health")
     async def health(request: Request) -> dict[str, object]:
@@ -81,11 +81,14 @@ def register_core_routes(app: FastAPI) -> None:
         delivery = await _production(request).delivery_summary()
         return {
             "status": "ok",
-            "version": "0.5.0",
+            "version": "0.6.0",
             "schema_version": await schema_version(_database(request).path),
             "schema_current": CURRENT_SCHEMA_VERSION,
             "active_profile": profile.name,
             "watch_scheduler_enabled": request.app.state.settings.watch_scheduler_enabled,
+            "supplier_quality_sampler_enabled": (
+                request.app.state.settings.supplier_quality_sampler_enabled
+            ),
             "runtime_active": sum(
                 1 for task in runtime if task["status"] in {"queued", "running"}
             ),
@@ -113,6 +116,7 @@ def register_core_routes(app: FastAPI) -> None:
             "running_jobs": summary["running_jobs"],
             "unread_alerts": summary["unread_alerts"],
             "alert_delivery_failed": delivery["failed"],
+            "alert_delivery_dead_letter": delivery["dead_letter"],
         }
         return PlainTextResponse(_telemetry(request).prometheus(extra))
 

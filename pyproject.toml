@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alibaba-scraper"
-version = "0.5.0"
-description = "Authenticated Alibaba sourcing research and production operations toolkit"
+version = "0.6.0"
+description = "Authenticated Alibaba sourcing platform with operational resilience tooling"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-v0.5 turns the v0.4 control plane into an authenticated production-style local service while keeping crawler, intelligence, and control repositories separate.
+v0.6 keeps the authenticated v0.5 control plane intact and adds an operational-resilience layer for recovery, credential rotation, bounded logging, database protection, alert dead letters, supplier-history sampling, and TLS reverse-proxy deployment.
 
 ## Process model
 
@@ -12,120 +12,86 @@ FastAPI / Uvicorn
   +-- Database ---------------- core product/crawl state
   +-- IntelligenceRepository -- suppliers, changes, watchlists, baseline scores
   +-- ControlRepository ------- profile scores, alerts, dashboard read models
-  +-- ProductionRepository ---- API keys, migrations, scenarios, bindings, sinks
+  +-- ProductionRepository ---- API keys, scenarios, category bindings, alert sinks
+  +-- ResilienceRepository ---- targeted queue retry + supplier quality history
   +-- AlibabaScraper ---------- bounded async public-page collection
   +-- RuntimeManager ---------- live crawl/watchlist tasks
   +-- watchlist scheduler ----- automatically runs due saved searches
-  +-- alert dispatcher -------- delivers persisted alerts to configured sinks
+  +-- alert dispatcher -------- backoff/dead-letter-aware webhook delivery
+  +-- supplier sampler -------- periodic observed-data quality snapshots
   +-- TelemetryRegistry ------- request/error/latency/uptime aggregates
+  +-- JSON logging ------------ rotating file + process stream
 ```
 
-The service opens each repository once for its lifespan. SQLite writes remain separated by repository-specific coroutine locks and WAL mode.
+The service opens each SQLite repository once for its lifespan. Writes remain separated by repository-specific coroutine locks and WAL mode. Resilience operations that mutate crawl queues refuse to run against an actively running crawl.
 
-## Live task behavior
+## Live task and queue recovery
 
-Starting a crawl through the API:
+Normal API-started crawls still create durable jobs and run through `RuntimeManager`. Cancellation keeps the existing behavior: it persists `cancelled` and returns `in_progress` queue rows to `pending`.
 
-1. creates a durable crawl job in SQLite;
-2. schedules an asyncio task;
-3. returns immediately with the runtime task key;
-4. updates durable crawl/queue state as collection progresses;
-5. computes active-profile and category-profile scores after completion;
-6. creates a high-score alert when candidates exceed the configured threshold.
+v0.6 adds targeted recovery for rows already in `error`. Operators can inspect only failed queue entries and select rows by ID or error substring. Selected rows return to `pending`; completed rows are never replayed. The operation uses an immediate SQLite transaction and is rejected while the owning job status is `running`.
 
-Cancellation cancels the asyncio task, marks the durable crawl `cancelled`, and returns any `in_progress` queue rows to `pending`. The job can therefore be resumed later.
+## Authentication and credential lifecycle
 
-## Authentication
+Authentication remains enabled by default. Persistent API keys are opaque `abs_...` values; only prefixes and SHA-256 digests are stored.
 
-Authentication is enabled by default. API keys are created locally with the CLI:
+v0.6 adds linked key rotation and short-lived opaque tokens:
 
-```bash
-alibaba-scraper api-key-create admin --scopes admin
-```
+- rotation creates the replacement before retiring the old key;
+- an optional grace period permits controlled client rollover;
+- rotation lineage is persisted;
+- short-lived tokens have a maximum 24-hour TTL;
+- token scopes cannot exceed the parent key;
+- expired, revoked, or disabled credentials do not authenticate.
 
-The plaintext key is returned only at creation time. SQLite stores the key prefix and SHA-256 digest, plus scopes, expiry, revocation, and last-used timestamps.
-
-Use the key as:
-
-```text
-X-API-Key: abs_...
-```
-
-Scopes are hierarchical:
-
-- `read` — GET/HEAD API operations;
-- `write` — write operations and read operations;
-- `admin` — API-key and alert-sink administration plus all other operations.
-
-The production browser dashboard can exchange the header key for an HttpOnly same-site session cookie. The classic dashboard then works through the same authenticated cookie.
-
-`GET /api/health/live` remains unauthenticated for process liveness checks. Detailed health, readiness, metrics, and all control/data API routes require a key when auth is enabled.
+Both persistent keys and tokens use `X-API-Key`. Browser sessions still use the HttpOnly same-site cookie flow.
 
 ## Migrations
 
-`migrations.py` owns ordered transactional migrations in `schema_migrations`. The service applies missing migrations before opening long-lived repositories.
+`migrations.py` remains the ordered transactional migration registry. Schema version 2 adds key lineage/token metadata, alert retry/dead-letter state, alert-sink retry policies, and supplier-quality snapshots.
 
-Operators can also run:
+The service applies missing migrations before opening long-lived repositories. `alibaba-scraper migrate` remains the explicit operator path.
 
-```bash
-alibaba-scraper migrate
-```
+## Background work
 
-The command is idempotent and reports the applied/current schema version.
+A normal long-running service can own three non-blocking loops:
 
-## Scheduled work
+1. watchlist scheduler — runs due saved searches;
+2. alert dispatcher — delivers due alerts and honors retry windows/dead letters;
+3. supplier-quality sampler — periodically persists observed-data supplier metrics.
 
-The long-running service now owns two background loops:
+Each loop can be configured independently. None uses busy-wait polling.
 
-1. the watchlist scheduler checks due saved searches and runs them with non-blocking sleeps;
-2. the alert dispatcher sends newly persisted alerts to configured external sinks.
+## Health, telemetry, and logs
 
-This means the normal systemd deployment uses one `alibaba-service` process. A separate `watch-daemon` is not required when the service scheduler is enabled.
+`/api/health/live`, `/api/health`, `/api/health/ready`, and `/metrics` remain the supervision endpoints. Detailed health now exposes dead-letter counts and supplier-sampler configuration.
 
-## Health and telemetry
-
-Routes:
-
-- `GET /api/health/live` — unauthenticated liveness;
-- `GET /api/health` — schema, active profile, runtime, alert delivery, request telemetry;
-- `GET /api/health/ready` — database/schema readiness;
-- `GET /metrics` — Prometheus-style counters and gauges.
-
-Telemetry is intentionally aggregate and bounded. It records request counts, server-error counts, average/max latency, uptime, and a bounded route-frequency map rather than full request bodies.
-
-## Category scoring
-
-A category binding maps a case-insensitive glob pattern such as `*solar*` to a scoring profile. Higher-priority bindings are evaluated first. Rescoring stores category-specific results separately from the active global profile, so no baseline/profile history is destroyed.
-
-Service-managed crawl and watchlist runs refresh category scores automatically. Operators can force a refresh with:
-
-```bash
-alibaba-scraper category-rescore
-```
+Request telemetry stays aggregate and bounded. Structured logs are JSON lines containing event metadata such as method, path, status, and latency; request bodies and authentication/secret values are not intentionally logged. Rotating-file retention bounds local disk usage while the same stream remains suitable for journald collection.
 
 ## Alert delivery
 
-v0.5 ships a webhook sink adapter. Each sink can configure:
+Webhook sinks retain HMAC signing, event-kind filters, severity filters, and custom headers. v0.6 adds per-sink:
 
-- URL;
-- optional HMAC-SHA256 signing secret;
-- additional headers;
-- event-kind filters;
-- minimum severity;
-- enabled/disabled state.
+- maximum attempts;
+- base backoff;
+- maximum backoff.
 
-Delivery attempts are persisted. Failed deliveries remain retryable; successful deliveries are not resent to the same sink.
+Failures are scheduled with capped exponential backoff. Exhausted alert/sink pairs move to persistent `dead_letter` state and stop retrying automatically. Operators can inspect and requeue individual dead letters after correcting the cause.
 
-## Landed-cost scenarios
+## Database resilience
 
-The calculator remains input-driven and jurisdiction-neutral. Saved scenarios persist the exact inputs and resulting calculation and can optionally reference a product key. Saving a scenario with an existing name updates it.
+Online backups use SQLite's native backup API so WAL state is captured consistently. Backups are integrity checked and SHA-256 hashed.
 
-## Dashboards
+Restore remains deliberately outside the live HTTP API. The CLI requires explicit confirmation; operators should stop the service first. The restore path validates the source backup, creates a pre-restore safety copy by default, restores into a temporary SQLite database, verifies it, and atomically replaces the target only after validation succeeds.
 
-`/` serves the production operations dashboard with API-key entry, health, charts, comparisons, saved scenarios, category bindings, alert sinks, and key metadata.
+## Supplier observed-data quality
 
-`/classic` preserves the v0.4 control dashboard for products, suppliers, jobs, watchlists, local alerts, scoring, and direct landed-cost calculations. It authenticates through the same session cookie after a key is entered on the operations dashboard.
+`ResilienceRepository` persists explainable supplier snapshots composed only from data visible to AlibabaScraper: product sourcing-score averages, field completeness, recent observed field-change stability, and catalog breadth.
 
-## Network exposure
+This is not a trust, legal, financial, safety, manufacturing-quality, or fulfillment rating. The components are stored with every snapshot so trends can be inspected without hiding the underlying evidence.
 
-The default bind remains `127.0.0.1:8787`. API-key auth is enabled by default, but API keys alone do not provide transport encryption. If the service is intentionally exposed beyond localhost, use TLS directly or an authenticated/TLS reverse proxy and keep system/firewall access restricted.
+## TLS and network exposure
+
+Uvicorn remains bound to `127.0.0.1:8787` by default. v0.6 can render hardened Caddy or Nginx reverse-proxy configurations that terminate TLS and proxy back to loopback.
+
+Caddy output is suitable for automatic HTTPS. Nginx output expects operator-supplied certificate/key paths. Generated configs include baseline HSTS and browser-security headers. API-key authentication does not replace transport encryption for intentionally remote deployments.

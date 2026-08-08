@@ -1,4 +1,3 @@
-# tests/test_service_v04.py
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -11,7 +10,8 @@ def test_service_health_dashboard_profiles_and_landed_cost(tmp_path: Path) -> No
     with TestClient(app) as client:
         health = client.get("/api/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.5.0"
+        assert health.json()["version"] == "0.6.0"
+        assert health.json()["schema_current"] == 2
 
         dashboard = client.get("/")
         assert dashboard.status_code == 200

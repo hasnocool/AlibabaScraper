@@ -11,6 +11,7 @@ from .landed_cost import LandedCostInput, LandedCostResult
 
 Scope = Literal["read", "write", "admin"]
 Severity = Literal["info", "warning", "error"]
+ApiKeyKind = Literal["persistent", "token"]
 
 
 class ApiKeyRecord(BaseModel):
@@ -19,6 +20,10 @@ class ApiKeyRecord(BaseModel):
     key_prefix: str
     scopes: list[Scope]
     enabled: bool
+    kind: ApiKeyKind = "persistent"
+    parent_key_id: int | None = None
+    rotated_from_id: int | None = None
+    rotated_to_id: int | None = None
     created_at: datetime
     last_used_at: datetime | None = None
     expires_at: datetime | None = None
@@ -91,12 +96,17 @@ class AlertSinkInput(BaseModel):
     event_kinds: list[str] = Field(default_factory=list)
     minimum_severity: Severity = "info"
     enabled: bool = True
+    max_attempts: int = Field(default=5, ge=1, le=100)
+    base_backoff_seconds: float = Field(default=30.0, ge=1.0, le=86400.0)
+    max_backoff_seconds: float = Field(default=3600.0, ge=1.0, le=604800.0)
 
     @model_validator(mode="after")
     def validate_endpoint(self) -> "AlertSinkInput":
         parsed = urlsplit(self.endpoint)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("webhook endpoint must be an http:// or https:// URL")
+        if self.max_backoff_seconds < self.base_backoff_seconds:
+            raise ValueError("max_backoff_seconds must be >= base_backoff_seconds")
         return self
 
 
@@ -110,5 +120,8 @@ class AlertSink(BaseModel):
     event_kinds: list[str] = Field(default_factory=list)
     minimum_severity: Severity
     enabled: bool
+    max_attempts: int = 5
+    base_backoff_seconds: float = 30.0
+    max_backoff_seconds: float = 3600.0
     created_at: datetime
     updated_at: datetime

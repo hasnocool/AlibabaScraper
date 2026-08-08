@@ -29,4 +29,10 @@ class Settings(BaseSettings):
     watch_scheduler_poll_seconds: float = Field(default=60.0, ge=1.0, le=3600.0)
     alert_dispatch_interval_seconds: float = Field(default=10.0, ge=1.0, le=3600.0)
     alert_delivery_timeout_seconds: float = Field(default=10.0, ge=1.0, le=120.0)
-    user_agent: str = "AlibabaScraper/0.5 (+public-data-research)"
+    supplier_quality_sampler_enabled: bool = True
+    supplier_quality_interval_seconds: float = Field(default=3600.0, ge=60.0, le=604800.0)
+    log_level: str = "INFO"
+    log_path: Path | None = Path("data/logs/alibaba-scraper.jsonl")
+    log_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=1024 * 1024 * 1024)
+    log_backup_count: int = Field(default=7, ge=0, le=100)
+    user_agent: str = "AlibabaScraper/0.6 (+public-data-research)"

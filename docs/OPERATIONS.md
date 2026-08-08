@@ -1,131 +1,93 @@
-# Production Operations Guide
+# Production Operations
 
-## 1. Upgrade and migrate
+## Bootstrap
 
 ```bash
-python -m pip install -e '.[dev]'
 alibaba-scraper migrate
-```
-
-The service also runs the same migration function automatically at startup.
-
-## 2. Create the first administrator key
-
-```bash
 alibaba-scraper api-key-create local-admin --scopes admin
-```
-
-Copy the returned `api_key` immediately. Only its hash is stored.
-
-Additional least-privilege examples:
-
-```bash
-alibaba-scraper api-key-create dashboard-read --scopes read
-alibaba-scraper api-key-create automation --scopes read,write --expires-days 90
-alibaba-scraper api-keys
-alibaba-scraper api-key-revoke 2
-```
-
-## 3. Configure `.env`
-
-Start from `.env.example`. Important production values:
-
-```env
-ALIBABA_SCRAPER_DATABASE_PATH=data/alibaba.sqlite3
-ALIBABA_SCRAPER_SERVICE_HOST=127.0.0.1
-ALIBABA_SCRAPER_SERVICE_PORT=8787
-ALIBABA_SCRAPER_AUTH_REQUIRED=true
-ALIBABA_SCRAPER_WATCH_SCHEDULER_ENABLED=true
-ALIBABA_SCRAPER_WATCH_SCHEDULER_POLL_SECONDS=60
-ALIBABA_SCRAPER_ALERT_DISPATCH_INTERVAL_SECONDS=10
-```
-
-## 4. Install systemd service
-
-For a normal per-user installation:
-
-```bash
 alibaba-scraper service-install --user --env-file .env
 alibaba-scraper service-status --user
 ```
 
-The installer writes `~/.config/systemd/user/alibaba-scraper.service`, reloads the user manager, enables the service, and restarts it unless `--no-start` is supplied.
-
-System-wide installation is also supported but requires appropriate permissions:
+## Routine checks
 
 ```bash
-sudo -E alibaba-scraper service-install --system --env-file /etc/alibaba-scraper.env
+alibaba-scraper db-integrity
+alibaba-scraper log-status
+alibaba-scraper alert-dead-letters
+alibaba-scraper supplier-quality
 ```
 
-Remove the unit with:
+## Backups
 
 ```bash
-alibaba-scraper service-uninstall --user
+alibaba-scraper db-backup
 ```
 
-## 5. Health checks
+Keep backup files outside the live data directory when possible and copy verified backups to storage with a different failure domain.
 
-Liveness:
+## Restore
+
+Stop the service, validate the backup, and only then restore:
 
 ```bash
-curl http://127.0.0.1:8787/api/health/live
+systemctl --user stop alibaba-scraper.service
+alibaba-scraper db-integrity --database /path/to/backup.sqlite3
+alibaba-scraper db-restore /path/to/backup.sqlite3 --yes
+systemctl --user start alibaba-scraper.service
 ```
 
-Authenticated health:
+A pre-restore safety backup is enabled by default.
+
+## Key rotation
 
 ```bash
-curl -H 'X-API-Key: abs_...' http://127.0.0.1:8787/api/health
+alibaba-scraper api-keys
+alibaba-scraper api-key-rotate 1 --grace-minutes 15
 ```
 
-Prometheus-style metrics:
+Update clients to the newly returned key before the grace period expires.
+
+For automation that does not need a long-lived secret:
 
 ```bash
-curl -H 'X-API-Key: abs_...' http://127.0.0.1:8787/metrics
+alibaba-scraper token-mint 2 --ttl-minutes 30 --scopes read
 ```
 
-## 6. Category-specific scoring
-
-Create scoring profiles with the existing profile commands, then bind categories:
+## Failed crawl rows
 
 ```bash
-alibaba-scraper profile-bind-category '*solar*' 2 --priority 200
-alibaba-scraper profile-bind-category '*battery*' 3 --priority 150
-alibaba-scraper profile-bindings
-alibaba-scraper category-rescore
+alibaba-scraper queue-errors 12 --contains timeout
+alibaba-scraper queue-retry 12 --queue-ids 44,47
+alibaba-scraper resume 12
 ```
 
-## 7. Saved landed-cost scenarios
+Do not retry queue rows while the job is running; the repository enforces this.
+
+## Alert dead letters
 
 ```bash
-alibaba-scraper landed-scenario-save '100-unit import' 12.50 100 \
-  --currency CAD --shipping 180 --duty-pct 5 --tax-pct 12
-
-alibaba-scraper landed-scenarios
+alibaba-scraper alert-dead-letters
+alibaba-scraper alert-dead-retry 8
 ```
 
-## 8. External alert delivery
+Investigate the stored error before requeueing.
 
-Configure a webhook:
+## Internet exposure
+
+Keep `ALIBABA_SCRAPER_SERVICE_HOST=127.0.0.1`. Generate a TLS reverse-proxy configuration:
 
 ```bash
-alibaba-scraper alert-sink-add ops https://example.invalid/alibaba-alerts \
-  --secret 'replace-me' \
-  --event-kinds high_score,watchlist_change \
-  --minimum-severity info
+alibaba-scraper proxy-render caddy scraper.example.com --output Caddyfile
 ```
 
-The service dispatcher handles delivery automatically. For an immediate manual delivery pass:
+or:
 
 ```bash
-alibaba-scraper alert-deliver
+alibaba-scraper proxy-render nginx scraper.example.com \
+  --cert-file /etc/letsencrypt/live/scraper.example.com/fullchain.pem \
+  --key-file /etc/letsencrypt/live/scraper.example.com/privkey.pem \
+  --output alibaba-scraper.conf
 ```
 
-When a sink secret is configured, requests include `X-AlibabaScraper-Signature: sha256=<hex>` over the exact JSON request body.
-
-## 9. Dashboards
-
-- Production operations: `http://127.0.0.1:8787/`
-- Classic control dashboard: `http://127.0.0.1:8787/classic`
-- OpenAPI: `http://127.0.0.1:8787/docs`
-
-Enter an API key on the production dashboard first. It establishes an HttpOnly same-site session cookie for the browser dashboards.
+API keys provide authentication/authorization; TLS protects those credentials and response data in transit.

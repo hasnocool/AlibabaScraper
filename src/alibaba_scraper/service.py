@@ -17,12 +17,17 @@ from .database import Database
 from .intelligence import IntelligenceRepository
 from .migrations import migrate_database
 from .production import ProductionRepository, Scope
+from .resilience import ResilienceRepository, SupplierQualitySampler
 from .runtime import RuntimeManager
 from .scraper import AlibabaScraper
 from .service_core_routes import register_core_routes
 from .service_production_routes import register_production_routes
+from .service_resilience_routes import register_resilience_routes
+from .structured_logging import configure_logging, get_logger
 from .telemetry import RequestTimer, TelemetryRegistry
 from .watchlists import WatchlistService
+
+_LOG = get_logger(__name__)
 
 
 def create_app(
@@ -38,16 +43,25 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings = Settings(database_path=path, auth_required=require_auth)
+        await asyncio.to_thread(
+            configure_logging,
+            level=settings.log_level,
+            path=settings.log_path,
+            max_bytes=settings.log_max_bytes,
+            backup_count=settings.log_backup_count,
+        )
         await migrate_database(path)
         database = Database(path)
         intelligence = IntelligenceRepository(path)
         control = ControlRepository(path)
         production = ProductionRepository(path)
+        resilience = ResilienceRepository(path)
         scraper = AlibabaScraper(settings)
         await database.open()
         await intelligence.open()
         await control.open()
         await production.open()
+        await resilience.open()
         runtime = RuntimeManager(
             database, intelligence, control, scraper, production=production
         )
@@ -58,6 +72,12 @@ def create_app(
             timeout_seconds=settings.alert_delivery_timeout_seconds,
         )
         dispatcher.start()
+        quality_sampler: SupplierQualitySampler | None = None
+        if settings.supplier_quality_sampler_enabled:
+            quality_sampler = SupplierQualitySampler(
+                resilience, interval_seconds=settings.supplier_quality_interval_seconds
+            )
+            quality_sampler.start()
         watch_scheduler: asyncio.Task[None] | None = None
         if settings.watch_scheduler_enabled:
             watch_service = WatchlistService(
@@ -74,28 +94,34 @@ def create_app(
         app.state.intelligence = intelligence
         app.state.control = control
         app.state.production = production
+        app.state.resilience = resilience
         app.state.scraper = scraper
         app.state.runtime = runtime
         app.state.telemetry = telemetry
         app.state.dispatcher = dispatcher
+        _LOG.info("service started", extra={"event": "service_start", "version": "0.6.0"})
         try:
             yield
         finally:
             if watch_scheduler is not None:
                 watch_scheduler.cancel()
                 await asyncio.gather(watch_scheduler, return_exceptions=True)
+            if quality_sampler is not None:
+                await quality_sampler.stop()
             await dispatcher.stop()
             await runtime.shutdown()
             await scraper.aclose()
+            await resilience.close()
             await production.close()
             await control.close()
             await intelligence.close()
             await database.close()
+            _LOG.info("service stopped", extra={"event": "service_stop"})
 
     app = FastAPI(
         title="AlibabaScraper",
-        version="0.5.0",
-        description="Authenticated Alibaba public-product collection and sourcing operations API.",
+        version="0.6.0",
+        description="Authenticated Alibaba sourcing platform with operational resilience.",
         lifespan=lifespan,
     )
 
@@ -126,14 +152,24 @@ def create_app(
             status_code = response.status_code
             return response
         finally:
+            elapsed = timer.elapsed()
             telemetry = getattr(request.app.state, "telemetry", None)
             if telemetry is not None:
-                await telemetry.observe(
-                    request.method, request.url.path, status_code, timer.elapsed()
-                )
+                await telemetry.observe(request.method, request.url.path, status_code, elapsed)
+            _LOG.info(
+                "http request",
+                extra={
+                    "event": "http_request",
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": status_code,
+                    "latency_seconds": round(elapsed, 6),
+                },
+            )
 
     register_core_routes(app)
     register_production_routes(app)
+    register_resilience_routes(app)
     _install_openapi_security(app, require_auth)
     return app
 
@@ -182,10 +218,10 @@ def _install_openapi_security(app: FastAPI, auth_required: bool) -> None:
             "type": "apiKey",
             "in": "header",
             "name": "X-API-Key",
-            "description": "AlibabaScraper API key created by the local CLI.",
+            "description": "AlibabaScraper API key or short-lived token.",
         }
-        for path, item in schema.get("paths", {}).items():
-            if not path.startswith("/api/") or path == "/api/health/live":
+        for route_path, item in schema.get("paths", {}).items():
+            if not route_path.startswith("/api/") or route_path == "/api/health/live":
                 continue
             for operation in item.values():
                 if isinstance(operation, dict) and "responses" in operation:
