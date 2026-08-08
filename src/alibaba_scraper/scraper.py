@@ -248,7 +248,9 @@ def _images(
         if isinstance(raw_images, str):
             images.append(urljoin(base_url, raw_images))
         elif isinstance(raw_images, list):
-            images.extend(urljoin(base_url, value) for value in raw_images if isinstance(value, str))
+            images.extend(
+                urljoin(base_url, value) for value in raw_images if isinstance(value, str)
+            )
 
     for node in tree.css("img"):
         src = node.attributes.get("src") or node.attributes.get("data-src")
@@ -291,7 +293,11 @@ def _price(product_json: dict[str, Any] | None, page_text: str) -> PriceRange | 
         return None
     if price is None:
         values = [tier.price for tier in tiers]
-        price = PriceRange(currency=_common_currency(tiers), minimum=min(values), maximum=max(values))
+        price = PriceRange(
+            currency=_common_currency(tiers),
+            minimum=min(values),
+            maximum=max(values),
+        )
     price.tiers = tiers
     if price.minimum is None and tiers:
         price.minimum = min(tier.price for tier in tiers)
