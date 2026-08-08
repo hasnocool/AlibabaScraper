@@ -49,7 +49,10 @@ def canonicalize_product_url(url: str, base_url: str = "https://www.alibaba.com/
     return urlunsplit(("https", "www.alibaba.com", split.path, query, ""))
 
 
-def parse_search_results(html: str, base_url: str = "https://www.alibaba.com/") -> list[SearchResult]:
+def parse_search_results(
+    html: str,
+    base_url: str = "https://www.alibaba.com/",
+) -> list[SearchResult]:
     """Extract and deduplicate product URLs from a public search result page."""
     tree = HTMLParser(html)
     seen: set[str] = set()
