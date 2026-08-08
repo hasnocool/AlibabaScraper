@@ -146,7 +146,11 @@ class Database:
     async def mark_job_running(self, job_id: int) -> None:
         now = _utcnow()
         await self.connection.execute(
-            "UPDATE crawl_jobs SET status = 'running', updated_at = ?, completed_at = NULL WHERE id = ?",
+            """
+            UPDATE crawl_jobs
+               SET status = 'running', updated_at = ?, completed_at = NULL
+             WHERE id = ?
+            """,
             (now, job_id),
         )
         await self.connection.execute(
@@ -238,7 +242,11 @@ class Database:
 
     async def mark_queue_done(self, queue_id: int) -> None:
         await self.connection.execute(
-            "UPDATE crawl_queue SET status = 'done', last_error = NULL, updated_at = ? WHERE id = ?",
+            """
+            UPDATE crawl_queue
+               SET status = 'done', last_error = NULL, updated_at = ?
+             WHERE id = ?
+            """,
             (_utcnow(), queue_id),
         )
         await self.connection.commit()
@@ -326,14 +334,8 @@ class Database:
                 )
                 latest = await latest_cursor.fetchone()
                 tracked = (price_min, price_max, currency, moq, record.minimum_order_unit)
-                latest_tracked = (
-                    tuple(
-                        latest[key]
-                        for key in ("price_min", "price_max", "currency", "moq", "moq_unit")
-                    )
-                    if latest
-                    else None
-                )
+                tracked_keys = ("price_min", "price_max", "currency", "moq", "moq_unit")
+                latest_tracked = tuple(latest[key] for key in tracked_keys) if latest else None
                 if latest_tracked != tracked:
                     await self.connection.execute(
                         """
@@ -411,7 +413,11 @@ class Database:
     async def fail_job(self, job_id: int) -> None:
         now = _utcnow()
         await self.connection.execute(
-            "UPDATE crawl_jobs SET status = 'failed', updated_at = ?, completed_at = ? WHERE id = ?",
+            """
+            UPDATE crawl_jobs
+               SET status = 'failed', updated_at = ?, completed_at = ?
+             WHERE id = ?
+            """,
             (now, now, job_id),
         )
         await self.connection.commit()
