@@ -88,7 +88,7 @@ class Database:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self._connection: aiosqlite.Connection | None = None
-        self._transaction_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
 
     async def __aenter__(self) -> "Database":
         await self.open()
@@ -118,16 +118,17 @@ class Database:
 
     async def create_job(self, query: str, max_products: int, max_search_pages: int) -> int:
         now = _utcnow()
-        cursor = await self.connection.execute(
-            """
-            INSERT INTO crawl_jobs(
-                query, status, max_products, max_search_pages, next_search_page,
-                created_at, updated_at
-            ) VALUES (?, 'pending', ?, ?, 1, ?, ?)
-            """,
-            (query, max_products, max_search_pages, now, now),
-        )
-        await self.connection.commit()
+        async with self._write_lock:
+            cursor = await self.connection.execute(
+                """
+                INSERT INTO crawl_jobs(
+                    query, status, max_products, max_search_pages, next_search_page,
+                    created_at, updated_at
+                ) VALUES (?, 'pending', ?, ?, 1, ?, ?)
+                """,
+                (query, max_products, max_search_pages, now, now),
+            )
+            await self.connection.commit()
         return int(cursor.lastrowid)
 
     async def get_job(self, job_id: int) -> CrawlJob:
@@ -145,46 +146,49 @@ class Database:
 
     async def mark_job_running(self, job_id: int) -> None:
         now = _utcnow()
-        await self.connection.execute(
-            """
-            UPDATE crawl_jobs
-               SET status = 'running', updated_at = ?, completed_at = NULL
-             WHERE id = ?
-            """,
-            (now, job_id),
-        )
-        await self.connection.execute(
-            """
-            UPDATE crawl_queue
-               SET status = 'pending', updated_at = ?
-             WHERE job_id = ? AND status = 'in_progress'
-            """,
-            (now, job_id),
-        )
-        await self.connection.commit()
+        async with self._write_lock:
+            await self.connection.execute(
+                """
+                UPDATE crawl_jobs
+                   SET status = 'running', updated_at = ?, completed_at = NULL
+                 WHERE id = ?
+                """,
+                (now, job_id),
+            )
+            await self.connection.execute(
+                """
+                UPDATE crawl_queue
+                   SET status = 'pending', updated_at = ?
+                 WHERE job_id = ? AND status = 'in_progress'
+                """,
+                (now, job_id),
+            )
+            await self.connection.commit()
 
     async def set_next_search_page(self, job_id: int, page: int) -> None:
-        await self.connection.execute(
-            "UPDATE crawl_jobs SET next_search_page = ?, updated_at = ? WHERE id = ?",
-            (page, _utcnow(), job_id),
-        )
-        await self.connection.commit()
+        async with self._write_lock:
+            await self.connection.execute(
+                "UPDATE crawl_jobs SET next_search_page = ?, updated_at = ? WHERE id = ?",
+                (page, _utcnow(), job_id),
+            )
+            await self.connection.commit()
 
     async def enqueue(self, job_id: int, urls: list[tuple[str, str | None]]) -> int:
         if not urls:
             return 0
         now = _utcnow()
-        before = self.connection.total_changes
-        await self.connection.executemany(
-            """
-            INSERT OR IGNORE INTO crawl_queue(
-                job_id, product_url, product_id, status, discovered_at, updated_at
-            ) VALUES (?, ?, ?, 'pending', ?, ?)
-            """,
-            [(job_id, url, product_id, now, now) for url, product_id in urls],
-        )
-        await self.connection.commit()
-        return self.connection.total_changes - before
+        async with self._write_lock:
+            before = self.connection.total_changes
+            await self.connection.executemany(
+                """
+                INSERT OR IGNORE INTO crawl_queue(
+                    job_id, product_url, product_id, status, discovered_at, updated_at
+                ) VALUES (?, ?, ?, 'pending', ?, ?)
+                """,
+                [(job_id, url, product_id, now, now) for url, product_id in urls],
+            )
+            await self.connection.commit()
+            return self.connection.total_changes - before
 
     async def queue_count(self, job_id: int) -> int:
         cursor = await self.connection.execute(
@@ -195,7 +199,7 @@ class Database:
 
     async def claim_pending(self, job_id: int, limit: int) -> list[QueueItem]:
         """Atomically claim a small batch so a crashed run can be safely resumed."""
-        async with self._transaction_lock:
+        async with self._write_lock:
             await self.connection.execute("BEGIN IMMEDIATE")
             try:
                 cursor = await self.connection.execute(
@@ -241,22 +245,28 @@ class Database:
         ]
 
     async def mark_queue_done(self, queue_id: int) -> None:
-        await self.connection.execute(
-            """
-            UPDATE crawl_queue
-               SET status = 'done', last_error = NULL, updated_at = ?
-             WHERE id = ?
-            """,
-            (_utcnow(), queue_id),
-        )
-        await self.connection.commit()
+        async with self._write_lock:
+            await self.connection.execute(
+                """
+                UPDATE crawl_queue
+                   SET status = 'done', last_error = NULL, updated_at = ?
+                 WHERE id = ?
+                """,
+                (_utcnow(), queue_id),
+            )
+            await self.connection.commit()
 
     async def mark_queue_error(self, queue_id: int, error: str) -> None:
-        await self.connection.execute(
-            "UPDATE crawl_queue SET status = 'error', last_error = ?, updated_at = ? WHERE id = ?",
-            (error[:2000], _utcnow(), queue_id),
-        )
-        await self.connection.commit()
+        async with self._write_lock:
+            await self.connection.execute(
+                """
+                UPDATE crawl_queue
+                   SET status = 'error', last_error = ?, updated_at = ?
+                 WHERE id = ?
+                """,
+                (error[:2000], _utcnow(), queue_id),
+            )
+            await self.connection.commit()
 
     async def upsert_product(self, record: ProductRecord) -> str:
         """Upsert current product state and append history only when tracked values change."""
@@ -268,7 +278,7 @@ class Database:
         currency = record.price.currency if record.price else None
         moq = _string_decimal(record.minimum_order_quantity)
 
-        async with self._transaction_lock:
+        async with self._write_lock:
             await self.connection.execute("BEGIN IMMEDIATE")
             try:
                 cursor = await self.connection.execute(
@@ -403,24 +413,26 @@ class Database:
         current = await self.summary(job_id)
         status = "completed_with_errors" if current.errors else "completed"
         now = _utcnow()
-        await self.connection.execute(
-            "UPDATE crawl_jobs SET status = ?, updated_at = ?, completed_at = ? WHERE id = ?",
-            (status, now, now, job_id),
-        )
-        await self.connection.commit()
+        async with self._write_lock:
+            await self.connection.execute(
+                "UPDATE crawl_jobs SET status = ?, updated_at = ?, completed_at = ? WHERE id = ?",
+                (status, now, now, job_id),
+            )
+            await self.connection.commit()
         return await self.summary(job_id)
 
     async def fail_job(self, job_id: int) -> None:
         now = _utcnow()
-        await self.connection.execute(
-            """
-            UPDATE crawl_jobs
-               SET status = 'failed', updated_at = ?, completed_at = ?
-             WHERE id = ?
-            """,
-            (now, now, job_id),
-        )
-        await self.connection.commit()
+        async with self._write_lock:
+            await self.connection.execute(
+                """
+                UPDATE crawl_jobs
+                   SET status = 'failed', updated_at = ?, completed_at = ?
+                 WHERE id = ?
+                """,
+                (now, now, job_id),
+            )
+            await self.connection.commit()
 
 
 def _utcnow() -> str:
